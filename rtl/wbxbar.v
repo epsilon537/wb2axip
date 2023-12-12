@@ -233,9 +233,11 @@ module	wbxbar #(
 	//
 	//
 
-	genvar	N, M;
+	
 	integer	iN, iM;
-	generate for(N=0; N<NM; N=N+1)
+	generate 
+	genvar	N, M;
+	for(N=0; N<NM; N=N+1)
 	begin : DECODE_REQUEST
 		// {{{
 		// Register declarations
@@ -347,6 +349,8 @@ module	wbxbar #(
 	end
 	// }}}
 
+	initial	sgrant = 0;
+
 	generate for(M=0; M<NS; M=M+1)
 	begin : SLAVE_GRANT
 		// {{{
@@ -372,7 +376,6 @@ module	wbxbar #(
 
 		// sgrant
 		// {{{
-		initial	sgrant[M] = 0;
 		always @(posedge i_clk)
 		begin
 			sgrant[M] <= sgrant[M];
@@ -414,6 +417,8 @@ module	wbxbar #(
 		assign	s_err[M]   = 1;
 		// }}}
 	end endgenerate
+
+	initial	mgrant = 0;
 
 	//
 	// Arbitrate among masters to determine who gets to access a given
@@ -495,7 +500,7 @@ module	wbxbar #(
 		// grant, mgrant
 		// {{{
 		initial	grant[N] = 0;
-		initial	mgrant[N] = 0;
+		
 		always @(posedge i_clk)
 		if (i_reset || !i_mcyc[N])
 		begin
@@ -561,7 +566,7 @@ module	wbxbar #(
 
 			// r_reindex
 			// {{{
-			always @(r_regrant, regrant)
+			always @(*)
 			begin
 				r_reindex = 0;
 				for(iM=0; iM<=NS; iM=iM+1)
@@ -715,6 +720,10 @@ module	wbxbar #(
 	//
 	//
 
+	
+	initial	o_scyc = 0;
+	initial	o_sstb = 0;
+	
 	//
 	// Part one
 	//
@@ -722,8 +731,7 @@ module	wbxbar #(
 	generate for(M=0; M<NS; M=M+1)
 	begin : GEN_CYC_STB
 		// {{{
-		initial	o_scyc[M] = 0;
-		initial	o_sstb[M] = 0;
+		
 		always @(posedge i_clk)
 		begin
 			if (sgrant[M])
@@ -841,10 +849,14 @@ module	wbxbar #(
 	////////////////////////////////////////////////////////////////////////
 	//
 	//
+	
 	generate if (OPT_DBLBUFFER)
 	begin : DOUBLE_BUFFERRED_STALL
 		// {{{
 		reg	[NM-1:0]	r_mack, r_merr;
+
+		initial	r_mack   = 0;
+		initial	r_merr   = 0;
 
 		for(N=0; N<NM; N=N+1)
 		begin : FOREACH_MASTER_PORT
@@ -864,12 +876,10 @@ module	wbxbar #(
 					m_stall[N] = 0;
 			end
 
-			initial	r_mack[N]   = 0;
-			initial	r_merr[N]   = 0;
 			always @(posedge i_clk)
 			begin
 				// Verilator lint_off WIDTH
-				iM = mindex[N];
+				// iM = mindex[N];
 				// Verilator lint_on  WIDTH
 				r_mack[N]   <= mgrant[N] && s_ack[mindex[N]];
 				r_merr[N]   <= mgrant[N] && s_err[mindex[N]];
@@ -987,6 +997,10 @@ module	wbxbar #(
 		// }}}
 	end endgenerate
 
+	initial mfull = 0;
+	initial	mnearfull = 0;
+	initial	mempty = ~0;
+
 	//
 	// Count the pending transactions per master
 	generate for(N=0; N<NM; N=N+1)
@@ -994,9 +1008,7 @@ module	wbxbar #(
 		// {{{
 		reg	[LGMAXBURST-1:0]	lclpending;
 		initial	lclpending  = 0;
-		initial	mempty[N]    = 1;
-		initial	mnearfull[N] = 0;
-		initial	mfull[N]     = 0;
+
 		always @(posedge i_clk)
 		if (i_reset || !i_mcyc[N] || o_merr[N])
 		begin
