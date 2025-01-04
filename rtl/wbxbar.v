@@ -46,9 +46,17 @@
 //  wind, in an effort to minimize transitions over bus wires.  This will
 //  cost some extra logic, for ... an uncertain power savings.
 //
+//  OPT_ACK_INVALID_ADDR: If set, wbxbar will acknowledge WB transactions to
+//  invalid addresses and, in case of read transactions, return the
+//  specified ERROR_DATA_PATTERN to the bus master (BoxLambda)
+//
+//  ERROR_DATA_PATTERN: 32-bit data pattern to return to the bus master
+//  when an invalid address is accessed. Only used if OPT_ACK_INVALID_ADDR is
+//  set (BoxLambda).
 //
 // Creator:  Dan Gisselquist, Ph.D.
 //    Gisselquist Technology, LLC
+// BoxLambda modifications by Epsilon537.
 //
 ////////////////////////////////////////////////////////////////////////////////
 // }}}
@@ -127,7 +135,16 @@ module wbxbar #(
     // that could be used to reduce the logic count of the device.
     // Hence, OPT_LOWPOWER will use more logic, but it won't drive
     // bus wires unless there's a value to drive onto them.
-    parameter [0:0] OPT_LOWPOWER = 1'b1
+    parameter [0:0] OPT_LOWPOWER = 1'b1,
+    //  OPT_ACK_INVALID_ADDR: If set, wbxbar will acknowledge WB transactions to
+    //  invalid addresses and, in case of read transactions, return the
+    //  specified ERROR_DATA_PATTERN to the bus master.
+    //
+    parameter [0:0] OPT_ACK_INVALID_ADDR = 1'b0,
+    //  ERROR_DATA_PATTERN: 32-bit data pattern to return to the bus master
+    //  when an invalid address is accessed. Only used if OPT_ACK_INVALID_ADDR is
+    //  set.
+    parameter [31:0] ERROR_DATA_PATTERN = 32'hDEADBEEF
     // }}}
 ) (
     // {{{
@@ -824,6 +841,10 @@ module wbxbar #(
           if (OPT_LOWPOWER && !mgrant[N]) o_mdata[N*DW+:DW] <= 0;
           else o_mdata[N*DW+:DW] <= s_data[mindex[N]];
 
+          if (OPT_ACK_INVALID_ADDR && mgrant[N] && s_err[mindex[N]]) begin
+            o_mdata[N*DW+:DW] <= ERROR_DATA_PATTERN;
+          end
+
           if (grant[N][NS] || (timed_out[N] && !o_mack[N])) begin
             r_mack[N] <= 1'b0;
             r_merr[N] <= !o_merr[N];
@@ -835,9 +856,9 @@ module wbxbar #(
           end
         end
 
-        assign o_mack[N] = r_mack[N];
+        assign o_mack[N] = OPT_ACK_INVALID_ADDR ? r_mack[N] || r_merr[N] : r_mack[N];
 
-        assign o_merr[N] = (!OPT_STARVATION_TIMEOUT || i_mcyc[N]) && r_merr[N];
+        assign o_merr[N] = !(OPT_ACK_INVALID_ADDR) && ((!OPT_STARVATION_TIMEOUT || i_mcyc[N]) && r_merr[N]);
 
       end
       // }}}
@@ -871,10 +892,14 @@ module wbxbar #(
             r_mack = 1'b0;
             r_merr = 1'b0;
           end
+
+          if (OPT_ACK_INVALID_ADDR && r_merr) begin
+            o_mdata[N*DW+:DW] = ERROR_DATA_PATTERN;
+          end
         end
 
-        assign o_mack[N] = r_mack;
-        assign o_merr[N] = r_merr;
+        assign o_mack[N] = OPT_ACK_INVALID_ADDR ? r_mack || r_merr : r_mack;
+        assign o_merr[N] = (!OPT_ACK_INVALID_ADDR) && r_merr;
       end
       // }}}
     end else begin : SINGLE_BUFFER_STALL
@@ -907,10 +932,14 @@ module wbxbar #(
             r_mack = 1'b0;
             r_merr = 1'b0;
           end
+
+          if (OPT_ACK_INVALID_ADDR && r_merr) begin
+            o_mdata[N*DW+:DW] = ERROR_DATA_PATTERN;
+          end
         end
 
-        assign o_mack[N] = r_mack;
-        assign o_merr[N] = r_merr;
+        assign o_mack[N] = OPT_ACK_INVALID_ADDR ? r_mack || r_merr : r_mack;
+        assign o_merr[N] = (!OPT_ACK_INVALID_ADDR) && r_merr;
       end
       // }}}
     end
@@ -975,7 +1004,7 @@ module wbxbar #(
           ||(m_stb[N] && !m_stall[N])
           ||(o_mack[N] || o_merr[N])
           ||(!OPT_STARVATION_TIMEOUT&&!mgrant[N]))
-      begin
+          begin
             deadlock_timer <= OPT_TIMEOUT;
             r_timed_out <= 0;
           end else if (deadlock_timer > 0) begin
